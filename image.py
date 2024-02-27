@@ -1,6 +1,8 @@
 import json
 import cv2
 import numpy as np
+from part import Part
+import gc
 
 
 class Image:
@@ -11,8 +13,8 @@ class Image:
         self.threshold_1 = 145
         self.threshold_2 = 11
         self.coordinates = []
-        self.counters = [] 
-        
+        self.counters = []
+
     def transform_zone(self, frame: np.ndarray) -> np.ndarray:
         """
         Преобразует изображение с использованием матрицы трансформации.
@@ -57,7 +59,6 @@ class Image:
 
         return cv2.undistort(frame, camera_matrix, dist_coefficients)
 
-    # TODO добавить калибровку из gui
     def image_correction(self, frame):
         brightened_image = cv2.convertScaleAbs(
             frame, alpha=self.brightness_factor, beta=0)
@@ -65,8 +66,8 @@ class Image:
         hsv_image[:, :, 1] = hsv_image[:, :, 1] * self.saturation_factor
         saturated_image = cv2.cvtColor(hsv_image, cv2.COLOR_HSV2BGR)
         # Применение гауссова размытия для уменьшения шума
-        # blurred = cv2.GaussianBlur(
-        #     saturated_image, (1, 1), 0)  # TODO Калибровка
+        blurred = cv2.GaussianBlur(
+            saturated_image, (1, 1), 0)  # TODO Калибровка
 
         # # Вычисление разности между исходным и размытым изображением
         # sharp = cv2.addWeighted(
@@ -74,22 +75,42 @@ class Image:
         return saturated_image
 
     def detect_contours(self, frame):
-        self.GRAY_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        _, threshold_image = cv2.threshold(
-            self.GRAY_frame, self.threshold_1, self.threshold_2, 0)
+        self.centers = []
+        self.angels = []
+        GRAY_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # Ищем контуры в пороговом изображении
-        contours, _ = cv2.findContours(
-            threshold_image, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        # image_with_contours = self.RGB_frame.copy()
-        cv2.drawContours(self.GRAY_frame, contours, -1, (0, 255, 0), 1)
-        cv2.drawContours(self.painted, contours, -1, (0, 255, 0), 1)
-        # Находим центр тяжести и площадь для каждого контура
-        for contour in contours:
-            # Находим моменты контура
+        # _, threshold_image = cv2.threshold(
+        #     GRAY_frame, self.threshold_1, self.threshold_2, 0)
+
+        # self.contours, _ = cv2.findContours(
+        #     threshold_image, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        # # ! cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_L1)
+
+        WHITE_frame = cv2.imread("Prepared_Image/white.jpg")
+
+        edges = cv2.Canny(GRAY_frame, self.threshold_1, self.threshold_2)
+        self.contours, hierarchy = cv2.findContours(
+            edges, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+
+        cv2.drawContours(frame, self.contours, -1, (0, 255, 0), 1)
+        cv2.drawContours(WHITE_frame, self.contours, -1,
+                         (0, 0, 255), thickness=3)  # TODO ТУТ ЕСТЬ ПАРАМЕТР КАЛИБРОВКИ!
+
+        WHITE_frame = cv2.GaussianBlur(WHITE_frame, (7, 7), 0)
+        cv2.imshow("ere_2", WHITE_frame)
+        WHITE_frame = cv2.cvtColor(WHITE_frame, cv2.COLOR_BGR2GRAY)
+
+        edges = cv2.Canny(WHITE_frame, self.threshold_1, self.threshold_2)
+        self.contours, hierarchy = cv2.findContours(
+            edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        cv2.drawContours(WHITE_frame, self.contours, -1,
+                         (255, 255, 255), thickness=cv2.FILLED)
+
+        self.parts = []
+        for contour in self.contours:
             M = cv2.moments(contour)
 
-            # Находим центр тяжести
             if M["m00"] != 0:
                 cX = int(M["m10"] / M["m00"])
                 cY = int(M["m01"] / M["m00"])
@@ -98,44 +119,40 @@ class Image:
 
             # Находим площадь контура
             area = cv2.contourArea(contour)
-            if area < 100 or area > 1000:
+            if area < 100 or area > 800:
                 continue
 
-            # Рисуем маркер для центра тяжести
-            cv2.circle(self.GRAY_frame, (cX, cY), 2, (255, 0, 0), -1)
-            cv2.circle(self.painted, (cX, cY), 2, (0, 0, 255), -1)
-
-            # Пишем площадь рядом с контуром
-            cv2.drawContours(self.GRAY_frame, contour, -1, (0, 255, 0), -1)
+            self.centers.append((cX, cY))
             self.counters.append(contour)
 
             rect = cv2.minAreaRect(contour)
-
             # Извлечь угол наклона из параметров прямоугольника
             angle = rect[2]
+            self.angels.append(angle)
 
-            # Отобразить изображение с контуром и углом наклона
-            self.painted = cv2.drawContours(
-                self.painted, [contour], -1, 255, 2)
-            self.painted = cv2.putText(self.painted, f"tilt angle: {angle:.2f}", (cX - 20, cY - 20),
-                                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1, cv2.LINE_AA)
-            """ cv2.putText(self.GRAY_frame, f"Area: {area}", (
-                cX - 20, cY - 20), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
-            cv2.putText(self.GRAY_frame, f"Coord: {cX, cY}", (
-                cX - 20, cY + 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2) """
+            cv2.putText(frame, f"Area: {area}", (cX - 20, cY - 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 1)
 
-            """ cv2.putText(self.painted, f"Area: {area}", (cX - 20, cY - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
-            cv2.putText(self.painted, f"Coord: {cX, cY}", (
-                cX - 20, cY + 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2) """
             self.coordinates.append([cX, cY])
+            cv2.putText(frame, f"{len(self.coordinates)}",
+                        (cX, cY), 1, 2, (0, 0, 0), 2)
+            self.part_type_definition(
+                cX, cY, angle, area, number=len(self.coordinates))
+        print(len(self.parts))
+        return frame, self.coordinates
 
-        print(f"Обнаружено деталей: {len(self.coordinates)}")
-        print(f"Координаты: {self.coordinates}")
-        return self.painted
+    def draw_contours(self, frame):
+        cv2.drawContours(frame, self.contours, -1, (0, 255, 0), 1)
+        for center, contour, angle in zip(self.coordinates, self.counters, self.angels):
+            cv2.circle(frame, tuple(center), 2, (0, 0, 255), -1)
+            frame = cv2.drawContours(frame, [contour], -1, 255, 1)
+            # frame = cv2.putText(frame, f"tilt angle: {angle:.2f}", (center[0] - 20, center[1] - 20),
+            #                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1, cv2.LINE_AA)
 
-    def draw_contours(self):
-        pass
+        # print(f"Обнаружено деталей: {len(self.coordinates)}")
+        # print(f"Координаты: {self.coordinates}")
+
+        return frame
 
     def prepare_frames(self, frame):
         self.frame = frame
@@ -143,3 +160,17 @@ class Image:
         self.GRAY_frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
         self.HSV_frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2HSV)
         self.painted = cv2.cvtColor(self.frame, cv2.COLOR_BGR2RGB)
+
+    def part_type_definition(self, cX, cY, angle, area, number):
+        # if area < 600 and area > 420:
+        #     print("Type 4, 5")
+        # elif area < 220 and area > 160:
+        #     print("Type 3")
+        # elif area < 310 and area > 250:
+        #     print("Type 2")
+        # elif area < 150 and area > 100:
+        #     print("Type 1")
+        
+        part = Part(cX, cY, angle, area, number)
+        self.parts.append(part)
+        

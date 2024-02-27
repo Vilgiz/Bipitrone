@@ -13,10 +13,11 @@ if __name__ == '__main__':
         frame = image.transform_zone(frame)
         frame = image.transform_chees(frame)
         frame = image.image_correction(frame)
-        image.prepare_frames(frame)
-        fmame_paint = image.detect_contours(frame)
+        #image.prepare_frames(frame)
+        frame_painted, __ = image.detect_contours(frame)
+        frame_painted = image.draw_contours(frame_painted)
 
-        camera.show(fmame_paint)
+        camera.show(frame_painted)
 
         key = cv2.waitKey(1)
         if key == ord('q'):

@@ -52,11 +52,18 @@ class ImageProcessor():
         heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
         maxHeight = max(int(heightA), int(heightB))
 
+        maxWidth = 279
+        maxHeight = 197
+        # dst = np.array([
+        #     [0, 0],
+        #     [maxWidth - 1, 0],
+        #     [maxWidth - 1, maxHeight - 1],
+        #     [0, maxHeight - 1]], dtype="float32")
         dst = np.array([
             [0, 0],
-            [maxWidth - 1, 0],
-            [maxWidth - 1, maxHeight - 1],
-            [0, maxHeight - 1]], dtype="float32")
+            [279, 0],
+            [279, 197],
+            [0, 197]], dtype="float32")
 
         M = cv2.getPerspectiveTransform(rect, dst)
 
