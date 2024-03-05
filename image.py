@@ -8,10 +8,12 @@ import gc
 class Image:
 
     def __init__(self, frame):
-        self.brightness_factor = 2.0  # TODO Калибровка
-        self.saturation_factor = 400  # TODO Калибровка
-        self.threshold_1 = 145
-        self.threshold_2 = 11
+        self.brightness_factor = 2.0
+        self.threshold_3 = 17
+        self.threshold_2 = 65
+        self.blur = 1
+        self.dilate = 9
+
         self.coordinates = []
         self.counters = []
 
@@ -60,98 +62,97 @@ class Image:
         return cv2.undistort(frame, camera_matrix, dist_coefficients)
 
     def image_correction(self, frame):
-        brightened_image = cv2.convertScaleAbs(
+        frame = cv2.convertScaleAbs(
             frame, alpha=self.brightness_factor, beta=0)
-        hsv_image = cv2.cvtColor(brightened_image, cv2.COLOR_BGR2HSV)
-        hsv_image[:, :, 1] = hsv_image[:, :, 1] * self.saturation_factor
-        saturated_image = cv2.cvtColor(hsv_image, cv2.COLOR_HSV2BGR)
-        # Применение гауссова размытия для уменьшения шума
-        blurred = cv2.GaussianBlur(
-            saturated_image, (1, 1), 0)  # TODO Калибровка
 
-        # # Вычисление разности между исходным и размытым изображением
-        # sharp = cv2.addWeighted(
-        #     blurred, 1.8, blurred, -0.1, 0)      # TODO Калибровка
-        return saturated_image
+        if self.blur % 2 == 0:
+            self.blur = self.blur + 1
+        if self.threshold_2 % 2 == 0:
+            self.threshold_2 = self.threshold_2 + 1
+        if self.threshold_3 == 1:
+            self.threshold_3 = self.threshold_3 + 2
+
+        frame = cv2.medianBlur(frame, 3)
+
+        return frame
 
     def detect_contours(self, frame):
         self.centers = []
         self.angels = []
         GRAY_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # _, threshold_image = cv2.threshold(
-        #     GRAY_frame, self.threshold_1, self.threshold_2, 0)
+        H, W, C = frame.shape
+        width, height = int(W), int(H)
+        WHITE_frame = np.ones((height, width, 3), np.uint8) * 0
+        olny_white = WHITE_frame.copy()
 
-        # self.contours, _ = cv2.findContours(
-        #     threshold_image, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        # # ! cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_L1)
+        thead_2 = cv2.adaptiveThreshold(
+            GRAY_frame, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, self.threshold_2, self.threshold_3)
 
-        WHITE_frame = cv2.imread("Prepared_Image/white.jpg")
+        thead_2 = cv2.medianBlur(thead_2, self.blur)
+        thead_2 = cv2.equalizeHist(thead_2)
 
-        edges = cv2.Canny(GRAY_frame, self.threshold_1, self.threshold_2)
-        self.contours, hierarchy = cv2.findContours(
-            edges, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+        kernel = np.ones((self.dilate, self.dilate), np.uint8)
+        thead_2 = cv2.dilate(thead_2, kernel, iterations=1)
 
-        cv2.drawContours(frame, self.contours, -1, (0, 255, 0), 1)
-        cv2.drawContours(WHITE_frame, self.contours, -1,
-                         (0, 0, 255), thickness=3)  # TODO ТУТ ЕСТЬ ПАРАМЕТР КАЛИБРОВКИ!
+        thead_2 = cv2.erode(thead_2, kernel, iterations=1)
+        thead_2 = cv2.morphologyEx(thead_2, cv2.MORPH_CLOSE, kernel)
 
-        WHITE_frame = cv2.GaussianBlur(WHITE_frame, (7, 7), 0)
-        cv2.imshow("ere_2", WHITE_frame)
-        WHITE_frame = cv2.cvtColor(WHITE_frame, cv2.COLOR_BGR2GRAY)
-
-        edges = cv2.Canny(WHITE_frame, self.threshold_1, self.threshold_2)
-        self.contours, hierarchy = cv2.findContours(
-            edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        cv2.drawContours(WHITE_frame, self.contours, -1,
-                         (255, 255, 255), thickness=cv2.FILLED)
+        self.contours_3, hierarchy = cv2.findContours(
+            thead_2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(WHITE_frame, self.contours_3, -1, (255, 255, 255), 1)
 
         self.parts = []
-        for contour in self.contours:
-            M = cv2.moments(contour)
+        if self.contours_3 != ():
+            for contour in self.contours_3:
+                M = cv2.moments(contour)
 
-            if M["m00"] != 0:
-                cX = int(M["m10"] / M["m00"])
-                cY = int(M["m01"] / M["m00"])
-            else:
-                cX, cY = 0, 0
+                if M["m00"] != 0:
+                    cX = int(M["m10"] / M["m00"])
+                    cY = int(M["m01"] / M["m00"])
+                else:
+                    cX, cY = 0, 0
 
-            # Находим площадь контура
-            area = cv2.contourArea(contour)
-            if area < 100 or area > 800:
-                continue
+                area = cv2.contourArea(contour)
+                if 50 < area < 400 and cY > 25:
 
-            self.centers.append((cX, cY))
-            self.counters.append(contour)
+                    self.centers.append((cX, cY))
+                    self.counters.append(contour)
 
-            rect = cv2.minAreaRect(contour)
-            # Извлечь угол наклона из параметров прямоугольника
-            angle = rect[2]
-            self.angels.append(angle)
+                    cv2.drawContours(olny_white, [contour], -1, (0, 255, 0), 1)
 
-            cv2.putText(frame, f"Area: {area}", (cX - 20, cY - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 1)
+                    roi, angle = self.orientation_detection(
+                        olny_white, contour)
+                    if angle == "above":
+                        cv2.circle(olny_white, (cX, cY), 2, (0, 0, 255), -1)
+                    elif angle == "under":
+                        cv2.circle(olny_white, (cX, cY), 2, (255, 0, 0), -1)
 
-            self.coordinates.append([cX, cY])
-            cv2.putText(frame, f"{len(self.coordinates)}",
-                        (cX, cY), 1, 2, (0, 0, 0), 2)
-            self.part_type_definition(
-                cX, cY, angle, area, number=len(self.coordinates))
-        print(len(self.parts))
-        return frame, self.coordinates
+                    # cv2.putText(frame, f"Area: {area}", (cX - 20, cY - 20),
+                    #             cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
+
+                    self.angels.append(angle)
+                    self.coordinates.append([cX, cY])
+
+                    self.part_type_definition(
+                        cX, cY, angle, area, number=len(self.coordinates))
+
+                    cv2.imshow("ROI", roi)
+        # print(len(self.parts))
+        cv2.imshow('result', WHITE_frame)
+        cv2.imshow("Video", thead_2)
+        cv2.imshow("Video_2", frame)
+        cv2.imshow("result_contour", olny_white)
+
+        return frame, self.coordinates, self.angels
 
     def draw_contours(self, frame):
-        cv2.drawContours(frame, self.contours, -1, (0, 255, 0), 1)
+        cv2.drawContours(frame, self.contours_3, -1, (0, 255, 0), 1)
         for center, contour, angle in zip(self.coordinates, self.counters, self.angels):
-            cv2.circle(frame, tuple(center), 2, (0, 0, 255), -1)
-            frame = cv2.drawContours(frame, [contour], -1, 255, 1)
-            # frame = cv2.putText(frame, f"tilt angle: {angle:.2f}", (center[0] - 20, center[1] - 20),
-            #                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1, cv2.LINE_AA)
-
-        # print(f"Обнаружено деталей: {len(self.coordinates)}")
-        # print(f"Координаты: {self.coordinates}")
-
+            if angle == "above":
+                cv2.circle(frame, tuple(center), 2, (0, 0, 255), -1)
+            elif angle == "under":
+                cv2.circle(frame, tuple(center), 2, (255, 0, 0), -1)
         return frame
 
     def prepare_frames(self, frame):
@@ -162,15 +163,64 @@ class Image:
         self.painted = cv2.cvtColor(self.frame, cv2.COLOR_BGR2RGB)
 
     def part_type_definition(self, cX, cY, angle, area, number):
-        # if area < 600 and area > 420:
-        #     print("Type 4, 5")
-        # elif area < 220 and area > 160:
-        #     print("Type 3")
-        # elif area < 310 and area > 250:
-        #     print("Type 2")
-        # elif area < 150 and area > 100:
-        #     print("Type 1")
-        
-        part = Part(cX, cY, angle, area, number)
+        number_type = "0"
+        if 230 < area < 265:
+            number_type = "4_5"
+        elif 110 < area < 180:
+            number_type = "3_4"
+        elif 60 < area < 100:
+            number_type = "1"
+
+        part = Part(cX, cY, angle, area, number, number_type)
         self.parts.append(part)
-        
+
+    def orientation_detection(self, frame, contour):
+        dist_result = [0, 0, 0]
+        x, y, w, h = cv2.boundingRect(contour)
+        if w > 0 and h > 0:
+            cv2.rectangle(frame, (x-5, y-5),
+                          (x+w+5, y+h+5), (255, 0, 0), 1)
+            if x <= 0:
+                x = 5
+            if y <= 0:
+                y = 5
+            roi = frame[y-5:y+5+h, x-5:x+w+5]
+            height, width, _ = roi.shape
+            roi = cv2.resize(roi, (int(width*10), int(height*10)))
+            height, width, _ = roi.shape
+            coord = []
+
+            for y in range(0, height, 15):
+                for x in range(0, width, 1):
+                    color = roi[y, x]
+                    if color[1] > 240:
+                        coord.append([x, y])
+                        if len(coord) == 2:
+                            dist = coord[1][0] - coord[0][0]
+                            if coord[1][1] != coord[0][1]:
+                                coord = []
+                            elif dist < 50:
+                                coord.pop(1)
+                            else:
+                                cv2.line(
+                                    roi, coord[0], coord[1], (255, 255, 255), 1)
+                                cv2.circle(
+                                    roi, coord[0], 2, (0, 0, 255), -1)
+                                cv2.circle(
+                                    roi, coord[1], 2, (0, 0, 255), -1)
+                                if dist > dist_result[0]:
+                                    dist_result = [dist, coord[0], coord[1]]
+                                coord = []
+        if dist_result[0] != 0:
+            cv2.line(roi, dist_result[1], dist_result[2], (255, 0, 255), 3)
+            cv2.putText(
+                roi, f"distance: {dist_result[0]}", (dist_result[1][0]-20, dist_result[1][1]-20), 1, 1, (255, 0, 255), 2)
+            cv2.line(roi, (0, int(height/2)),
+                     (width, int(height/2)), (255, 255, 255), 2)
+            if dist_result[1][1] < int(height/2):
+                angel = "under"
+            else:
+                angel = "above"
+                return roi, angel
+        angel = "under"
+        return roi, angel
