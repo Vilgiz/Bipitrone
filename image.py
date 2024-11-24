@@ -2,7 +2,6 @@ import json
 import cv2
 import numpy as np
 from part import Part
-import gc
 
 
 class Image:
@@ -16,6 +15,7 @@ class Image:
 
         self.coordinates = []
         self.counters = []
+
 
     def transform_zone(self, frame: np.ndarray) -> np.ndarray:
         """
