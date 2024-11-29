@@ -1,43 +1,88 @@
 from typing import Optional, Any
-from pypylon import pylon
+from hik_camera.hik_camera import HikCamera
 import cv2
+
 
 class Camera:
     """
-    Класс для работы с камерой, получения изображений и их отображения.
+    Класс для работы с IP-камерой Hikvision.
 
     Attributes:
-        camera (pylon.InstantCamera): Объект камеры для захвата изображений.
-        start_grab_flag (bool): Флаг, указывающий на начало захвата изображений.
+        camera (HikCamera): Объект камеры для захвата изображений.
+        ip (str): IP-адрес подключенной камеры.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, ip: Optional[str] = None) -> None:
         """
         Инициализация объекта Camera.
+
+        Args:
+            ip (Optional[str]): IP-адрес камеры. Если не указан, автоматически выбирается первая доступная камера.
         """
-        self.camera = pylon.InstantCamera(
-            pylon.TlFactory.GetInstance().CreateFirstDevice())
-        self.start_grab_flag = True
+        self.ip = ip if ip else self._get_first_camera_ip()
+        if not self.ip:
+            raise RuntimeError("Не удалось найти доступные камеры.")
+
+        self.camera = HikCamera(ip=self.ip)
+        self._configure_camera()
+
+    def _get_first_camera_ip(self) -> Optional[str]:
+        """
+        Получает IP-адрес первой доступной камеры.
+
+        Returns:
+            Optional[str]: IP-адрес первой камеры или None, если камеры не найдены.
+        """
+        ips = HikCamera.get_all_ips()
+        if ips:
+            print(f"Найдены камеры: {ips}")
+            return ips[0]
+        print("Камеры не найдены.")
+        return None
+
+    def _configure_camera(self) -> None:
+        """
+        Настраивает параметры камеры.
+        """
+        try:
+            # Отключить автоматическую экспозицию
+            self.camera["ExposureAuto"] = "Off"
+            print("Автоматическая экспозиция отключена.")
+
+            # Проверить доступные параметры
+            available_params = self.camera.get_all_parameters()
+            if "ExposureTime" not in available_params:
+                print("Параметр ExposureTime недоступен для этой камеры.")
+                return
+
+            # Попытаться получить текущее значение экспозиции
+            current_exposure = self.camera["ExposureTime"]
+            print(f"Текущее время экспозиции: {current_exposure}")
+
+            # Установить новое значение экспозиции
+            self.camera["ExposureTime"] = 8000
+            print(f"Новое время экспозиции: {self.camera['ExposureTime']}")
+        except AssertionError as e:
+            print(f"Ошибка настройки камеры: {e}")
 
     def get_image(self) -> Optional[Any]:
         """
         Получает изображение с камеры.
 
         Returns:
-            frame (Optional[Any]): Изображение в формате NumPy
-            массива или None, если произошла ошибка.
+            Optional[Any]: Изображение в формате NumPy массива или None, если произошла ошибка.
         """
-        if self.start_grab_flag:
-            self.camera.Open()
-            self.camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
-            self.start_grab_flag = False  # Установим флаг в False после первого вызова
-        grab_result = self.camera.RetrieveResult(
-            5000, pylon.TimeoutHandling_ThrowException)
-        if grab_result.GrabSucceeded():
-            frame = grab_result.Array
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            return frame
-        return None
+        try:
+            with self.camera:
+                frame = self.camera.robust_get_frame()
+                if len(frame.shape) == 2:
+                    GRAY_frame = frame
+                else:
+                    GRAY_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                return GRAY_frame
+        except Exception as e:
+            print(f"Ошибка получения изображения: {e}")
+            return None
 
     def show(self, frame: Any) -> None:
         """
@@ -49,26 +94,36 @@ class Camera:
         Returns:
             None
         """
-        cv2.imshow("Test Video", frame)
+        if frame is not None:
+            cv2.imshow("Camera Feed", frame)
 
     def end(self) -> None:
         """
-        Прекращает работу камеры и закрывает окно отображения изображений.
+        Завершает работу с камерой и закрывает окна отображения.
 
         Returns:
             None
         """
-        self.camera.StopGrabbing()
         cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
-    camera = Camera()
+    # Инициализация камеры
+    try:
+        camera = Camera()
 
-    while True:
-        frame = camera.get_image()
-        camera.show(frame)
+        while True:
+            # Получаем изображение
+            frame = camera.get_image()
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-    camera.end_show()
+            # Отображаем изображение
+            if frame is not None:
+                camera.show(frame)
+
+            # Выход по нажатию 'q'
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+        camera.end()
+
+    except RuntimeError as e:
+        print(f"Ошибка: {e}")

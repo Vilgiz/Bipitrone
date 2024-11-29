@@ -16,7 +16,6 @@ class Image:
         self.coordinates = []
         self.counters = []
 
-
     def transform_zone(self, frame: np.ndarray) -> np.ndarray:
         """
         Преобразует изображение с использованием матрицы трансформации.
@@ -77,17 +76,22 @@ class Image:
         return frame
 
     def detect_contours(self, frame):
+        # if frame is None or len(frame.shape) != 3:
+        #     print("Ошибка: некорректное изображение!")
+        #     print(len(frame.shape))
+        #     return frame, [], []
+
         self.centers = []
         self.angels = []
-        GRAY_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # GRAY_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        H, W, C = frame.shape
+        H, W = frame.shape
         width, height = int(W), int(H)
         WHITE_frame = np.ones((height, width, 3), np.uint8) * 0
         olny_white = WHITE_frame.copy()
 
         thead_2 = cv2.adaptiveThreshold(
-            GRAY_frame, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, self.threshold_2, self.threshold_3)
+            frame, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, self.threshold_2, self.threshold_3)
 
         thead_2 = cv2.medianBlur(thead_2, self.blur)
         thead_2 = cv2.equalizeHist(thead_2)
